@@ -1,14 +1,43 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.api.routes import auth, users, rooms, messages, files, notifications
 from app.api.websocket.ws_routes import router as ws_router
+from app.api.websocket.chat_manager import manager
+from app.core.redis import close_redis
+import logging
+
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan - startup and shutdown"""
+    # Startup
+    logger.info("Initializing application...")
+    try:
+        await manager.initialize_redis()
+        logger.info("Redis Pub/Sub initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Redis: {e}")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down application...")
+    try:
+        await manager.cleanup()
+        await close_redis()
+        logger.info("Redis connections closed")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Real-Time Collaboration Platform API",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Add CORS middleware

@@ -30,8 +30,12 @@ async def get_current_user_ws(token: Optional[str]) -> Optional[dict]:
         user_id = int(payload.get('sub'))
         
         # Get database session
-        db = next(get_db())
-        user = await get_user_by_id(db, user_id)
-        return user
-    except (JWTError, ValueError, TypeError):
+        from app.db.session import AsyncSessionLocal
+        db = AsyncSessionLocal()
+        try:
+            user = await get_user_by_id(db, user_id)
+            return user
+        finally:
+            await db.close()
+    except (JWTError, ValueError, TypeError, Exception):
         return None

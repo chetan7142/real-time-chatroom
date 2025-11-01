@@ -34,9 +34,18 @@ class ConnectionManager:
         try:
             async for message in self.pubsub.listen():
                 if message["type"] == "pmessage":
-                    room_id = int(message["channel"].split(":")[1])
-                    data = json.loads(message["data"])
-                    await self._broadcast_to_room(room_id, data)
+                    # Extract room_id from pattern "room:*"
+                    channel = message.get("channel", "")
+                    if "room:" in channel:
+                        room_id_str = channel.replace("room:", "")
+                        try:
+                            room_id = int(room_id_str)
+                            data = json.loads(message["data"])
+                            await self._broadcast_to_room(room_id, data)
+                        except (ValueError, json.JSONDecodeError) as e:
+                            logger.error(f"Error processing Redis message: {e}")
+        except asyncio.CancelledError:
+            logger.info("Redis message processing cancelled")
         except Exception as e:
             logger.error(f"Error processing Redis messages: {e}")
 
@@ -62,7 +71,7 @@ class ConnectionManager:
                 "room_id": room_id
             })
 
-    def disconnect(self, room_id: int, websocket: WebSocket):
+    async def disconnect(self, room_id: int, websocket: WebSocket):
         """Disconnect a WebSocket from a room"""
         if room_id in self.active_connections:
             self.active_connections[room_id].discard(websocket)
@@ -76,14 +85,15 @@ class ConnectionManager:
                 self.user_connections[user_id].discard(websocket)
                 if not self.user_connections[user_id]:
                     del self.user_connections[user_id]
-            del self.websocket_users[websocket]
             
-            # Notify room about user leaving
-            asyncio.create_task(self._publish_to_room(room_id, {
+            # Notify room about user leaving before removing the mapping
+            await self._publish_to_room(room_id, {
                 "type": "user_left",
                 "user_id": user_id,
                 "room_id": room_id
-            }))
+            })
+            
+            del self.websocket_users[websocket]
 
     async def _broadcast_to_room(self, room_id: int, message: dict):
         """Broadcast message to all WebSockets in a room"""

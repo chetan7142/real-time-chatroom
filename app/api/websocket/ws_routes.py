@@ -1,10 +1,10 @@
 import json
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.api.deps import get_current_user_ws
 from app.api.websocket.chat_manager import manager
 from app.services.message_service import create_message
 from app.services.room_service import user_is_room_member
-from app.db.session import get_db
+from app.db.session import AsyncSessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
@@ -12,23 +12,46 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.websocket('/rooms/{room_id}')
-async def websocket_endpoint(websocket: WebSocket, room_id: int, token: str = None):
-    """WebSocket endpoint for real-time chat in a room"""
+async def websocket_endpoint(websocket: WebSocket, room_id: int):
+    """WebSocket endpoint for real-time chat in a room
+    
+    Token can be passed as:
+    - Query parameter: ?token=xxx
+    - Authorization header: Authorization: Bearer xxx
+    """
+    db: AsyncSession = None
     try:
+        # Get token from query params or headers (before accepting)
+        token = None
+        query_params = dict(websocket.query_params)
+        token = query_params.get('token')
+        
+        if not token:
+            # Try Authorization header
+            headers = dict(websocket.headers)
+            auth_header = headers.get('authorization', '')
+            if auth_header.startswith('Bearer '):
+                token = auth_header.replace('Bearer ', '')
+        
         # Authenticate user
         user = await get_current_user_ws(token)
         if not user:
+            await websocket.accept()
             await websocket.close(code=1008, reason="Authentication required")
             return
         
+        # Get database session
+        db = AsyncSessionLocal()
+        
         # Check if user is a member of the room
-        db = next(get_db())
         is_member = await user_is_room_member(db, room_id, user.id)
         if not is_member:
+            await db.close()
+            await websocket.accept()
             await websocket.close(code=1008, reason="Access denied")
             return
         
-        # Connect to room
+        # Connect to room (this will accept the connection)
         await manager.connect(room_id, websocket, user.id)
         
         try:
@@ -41,10 +64,14 @@ async def websocket_endpoint(websocket: WebSocket, room_id: int, token: str = No
         except Exception as e:
             logger.error(f"WebSocket error: {e}")
         finally:
-            manager.disconnect(room_id, websocket)
+            await manager.disconnect(room_id, websocket)
+            if db:
+                await db.close()
             
     except Exception as e:
         logger.error(f"WebSocket connection error: {e}")
+        if db:
+            await db.close()
         await websocket.close(code=1011, reason="Internal server error")
 
 async def handle_websocket_message(room_id: int, user_id: int, data: dict, db: AsyncSession):
@@ -103,6 +130,4 @@ async def handle_websocket_message(room_id: int, user_id: int, data: dict, db: A
     else:
         logger.warning(f"Unknown message type: {message_type}")
 
-# Initialize Redis when the module is imported
-import asyncio
-asyncio.create_task(manager.initialize_redis())
+# Redis will be initialized when app starts (see main.py)
