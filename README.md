@@ -1,1 +1,1 @@
-# real-time-chatroom
+# Real-Time Collaboration Platform (FastAPI)\n\nSkeleton + core boilerplate created for development.

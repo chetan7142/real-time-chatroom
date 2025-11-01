@@ -1,0 +1,5 @@
+[tool.poetry]
+name = "realtime-collab"
+version = "0.1.0"
+description = "Real-Time Collaboration Platform built with FastAPI"
+authors = ["Your Name <you@example.com>"]
