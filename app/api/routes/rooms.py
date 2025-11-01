@@ -77,3 +77,56 @@ async def delete_room_endpoint(
         raise HTTPException(status_code=404, detail="Room not found")
     except UnauthorizedError:
         raise HTTPException(status_code=403, detail="Only room owner can delete the room")
+
+
+@router.post('/{room_id}/members', response_model=RoomMemberRead, status_code=201)
+async def add_room_member_endpoint(
+    room_id: int,
+    member_data: RoomMemberCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserRead = Depends(get_current_user)
+):
+    """Add a member to a room"""
+    try:
+        member = await add_room_member(db, room_id, member_data, current_user.id)
+        return member
+    except RoomNotFoundError:
+        raise HTTPException(status_code=404, detail="Room not found")
+    except UserNotFoundError:
+        raise HTTPException(status_code=404, detail="User not found")
+    except UnauthorizedError:
+        raise HTTPException(status_code=403, detail="You don't have permission to add members")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.delete('/{room_id}/members/{user_id}')
+async def remove_room_member_endpoint(
+    room_id: int,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserRead = Depends(get_current_user)
+):
+    """Remove a member from a room"""
+    try:
+        await remove_room_member(db, room_id, user_id, current_user.id)
+        return {"message": "Member removed successfully"}
+    except RoomNotFoundError:
+        raise HTTPException(status_code=404, detail="Room not found")
+    except UnauthorizedError:
+        raise HTTPException(status_code=403, detail="You don't have permission to remove members")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get('/{room_id}/members', response_model=List[RoomMemberRead])
+async def get_room_members_endpoint(
+    room_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserRead = Depends(get_current_user)
+):
+    """Get all members of a room"""
+    room = await get_room(db, room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    members = await get_room_members(db, room_id)
+    return members
